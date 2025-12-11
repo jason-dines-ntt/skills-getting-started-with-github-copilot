@@ -137,11 +137,47 @@ class TestSignupEndpoint:
 
     def test_signup_with_special_characters_in_email(self):
         """Test signup with email containing special characters"""
-        email = "student+test@mergington.edu"
+        email = "student+plus@mergington.edu"
         response = client.post(
-            f"/activities/Science%20Club/signup?email={email}"
+            f"/activities/Science%20Club/signup?email={email.replace('+', '%2B')}"
         )
         assert response.status_code == 200
+
+    def test_signup_with_invalid_email_no_at_symbol(self):
+        """Test that signup with invalid email (no @ symbol) returns 400"""
+        response = client.post(
+            "/activities/Chess%20Club/signup?email=invalidemail"
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "Invalid email format" in data["detail"]
+
+    def test_signup_with_invalid_email_no_domain(self):
+        """Test that signup with invalid email (no domain) returns 400"""
+        response = client.post(
+            "/activities/Programming%20Class/signup?email=student@"
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "Invalid email format" in data["detail"]
+
+    def test_signup_with_invalid_email_no_tld(self):
+        """Test that signup with invalid email (no TLD) returns 400"""
+        response = client.post(
+            "/activities/Gym%20Class/signup?email=student@domain"
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "Invalid email format" in data["detail"]
+
+    def test_signup_with_spaces_in_email(self):
+        """Test that signup with spaces in email returns 400"""
+        response = client.post(
+            "/activities/Basketball%20Team/signup?email=student%20email@domain.com"
+        )
+        assert response.status_code == 400
+        data = response.json()
+        assert "Invalid email format" in data["detail"]
 
     def test_signup_preserves_existing_participants(self):
         """Test that signup doesn't remove existing participants"""
@@ -160,6 +196,129 @@ class TestSignupEndpoint:
         # Check that all original participants are still there
         for original_participant in music_ensemble["participants"]:
             assert original_participant in music_ensemble_after["participants"]
+
+
+class TestRemoveParticipantEndpoint:
+    """Test cases for the DELETE /activities/{activity_name}/participants/{email} endpoint"""
+
+    def test_remove_participant_returns_200(self):
+        """Test that removing a participant returns 200"""
+        # First sign up
+        client.post(
+            "/activities/Chess%20Club/signup?email=toremove@mergington.edu"
+        )
+        
+        # Then remove
+        response = client.delete(
+            "/activities/Chess%20Club/participants/toremove%40mergington.edu"
+        )
+        assert response.status_code == 200
+
+    def test_remove_participant_returns_success_message(self):
+        """Test that remove returns a success message"""
+        email = "removeme@mergington.edu"
+        
+        # Sign up first
+        client.post(
+            f"/activities/Programming%20Class/signup?email={email}"
+        )
+        
+        # Remove
+        response = client.delete(
+            f"/activities/Programming%20Class/participants/{email}"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "message" in data
+        assert "Removed" in data["message"]
+
+    def test_remove_nonexistent_participant_returns_404(self):
+        """Test that removing non-existent participant returns 404"""
+        response = client.delete(
+            "/activities/Chess%20Club/participants/nothere%40mergington.edu"
+        )
+        assert response.status_code == 404
+        data = response.json()
+        assert "not found" in data["detail"].lower()
+
+    def test_remove_from_nonexistent_activity_returns_404(self):
+        """Test that removing from non-existent activity returns 404"""
+        response = client.delete(
+            "/activities/Nonexistent%20Club/participants/email%40mergington.edu"
+        )
+        assert response.status_code == 404
+        data = response.json()
+        assert "Activity not found" in data["detail"]
+
+    def test_remove_participant_actually_removes(self):
+        """Test that remove actually removes the participant"""
+        email = "todelete@mergington.edu"
+        activity = "Soccer%20Club"
+        
+        # Sign up
+        client.post(f"/activities/{activity}/signup?email={email}")
+        
+        # Get initial count
+        response_before = client.get("/activities")
+        participants_before = response_before.json()["Soccer Club"]["participants"]
+        
+        # Remove
+        remove_response = client.delete(
+            f"/activities/{activity}/participants/{email}"
+        )
+        assert remove_response.status_code == 200
+        
+        # Get updated count
+        response_after = client.get("/activities")
+        participants_after = response_after.json()["Soccer Club"]["participants"]
+        
+        assert len(participants_after) == len(participants_before) - 1
+        assert email not in participants_after
+
+    def test_remove_preserves_other_participants(self):
+        """Test that removing one participant doesn't affect others"""
+        email_to_remove = "removeonly@mergington.edu"
+        
+        # Get original participants
+        response_before = client.get("/activities")
+        original_participants = response_before.json()["Science Club"]["participants"].copy()
+        
+        # Sign up new participant
+        client.post(
+            f"/activities/Science%20Club/signup?email={email_to_remove}"
+        )
+        
+        # Remove the new participant
+        client.delete(
+            f"/activities/Science%20Club/participants/{email_to_remove}"
+        )
+        
+        # Check that original participants are still there
+        response_after = client.get("/activities")
+        participants_after = response_after.json()["Science Club"]["participants"]
+        
+        for original_participant in original_participants:
+            assert original_participant in participants_after
+
+    def test_remove_same_participant_twice_returns_404(self):
+        """Test that removing the same participant twice returns 404"""
+        email = "removetwice@mergington.edu"
+        activity = "Debate%20Team"
+        
+        # Sign up
+        client.post(f"/activities/{activity}/signup?email={email}")
+        
+        # Remove first time
+        response1 = client.delete(
+            f"/activities/{activity}/participants/{email}"
+        )
+        assert response1.status_code == 200
+        
+        # Remove second time should fail
+        response2 = client.delete(
+            f"/activities/{activity}/participants/{email}"
+        )
+        assert response2.status_code == 404
 
 
 class TestRootEndpoint:
